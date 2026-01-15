@@ -1,6 +1,8 @@
 import Express from "express";
 import orderRouter from "./order-routes.js";
+import dotenv from "dotenv";
 export const app = Express();
+dotenv.config();
 app.use(Express.json());
 
 const PORT = process.env.PORT || 3000;

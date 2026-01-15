@@ -93,8 +93,19 @@ Resources:
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        S3Bucket: your-artifact-bucket
+        S3Bucket: awslambdazips-al
         S3Key: lambdas/payment.zip
+
+  FinalizerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub finalizer-${Environment}
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: awslambdazips-al
+        S3Key: lambdas/finalizer.zip
 
   ### STEP FUNCTION ###
   OrderStateMachine:

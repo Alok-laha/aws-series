@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Async Order Processing System
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+Resources:
+  OrderDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: order-dlq-${Environment}
+  OrderQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: order-queue-${Environment}
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+          - OrderDLQ
+          - Arn
+        maxReceiveCount: 3
+  OrderNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: order-notifications-${Environment}
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: lambda-exec-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: LambdaAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+              Fn::GetAtt:
+              - OrderQueue
+              - Arn
+          - Effect: Allow
+            Action:
+            - states:StartExecution
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - sns:Publish
+            Resource:
+              Ref: OrderNotificationTopic
+  StepFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: stepfn-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: states.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: StepFnPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - lambda:InvokeFunction
+            Resource: '*'
+  PaymentLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: payment-${Environment}
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role:
+        Fn::GetAtt:
+        - LambdaExecutionRole
+        - Arn
+      Code:
+        S3Bucket: awslambdazips-al
+        S3Key: lambdas/payment.zip
+  FinalizerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: finalizer-${Environment}
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role:
+        Fn::GetAtt:
+        - LambdaExecutionRole
+        - Arn
+      Code:
+        S3Bucket: awslambdazips-al
+        S3Key: lambdas/finalizer.zip
+  OrderStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName:
+        Fn::Sub: order-workflow-${Environment}
+      RoleArn:
+        Fn::GetAtt:
+        - StepFunctionRole
+        - Arn
+      DefinitionString:
+        Fn::Sub: "{\n  \"StartAt\": \"ProcessPayment\",\n  \"States\": {\n    \"ProcessPayment\"\
+          : {\n      \"Type\": \"Task\",\n      \"Resource\": \"${PaymentLambda.Arn}\"\
+          ,\n      \"Retry\": [{\n        \"ErrorEquals\": [\"States.ALL\"],\n   \
+          \     \"IntervalSeconds\": 5,\n        \"MaxAttempts\": 2\n      }],\n \
+          \     \"Next\": \"FinalizeOrder\"\n    },\n    \"FinalizeOrder\": {\n  \
+          \    \"Type\": \"Task\",\n      \"Resource\": \"${FinalizerLambda.Arn}\"\
+          ,\n      \"End\": true\n    }\n  }\n}\n"
+Outputs:
+  OrderQueueUrl:
+    Value:
+      Ref: OrderQueue
+  StateMachineArn:
+    Value:
+      Ref: OrderStateMachine
