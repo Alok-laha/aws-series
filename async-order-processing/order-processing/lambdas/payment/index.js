@@ -1,9 +1,17 @@
-exports.handler = async (event) => {
-  console.log("Payment event:", JSON.stringify(event));
+import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 
-  if (Math.random() < 0.7) {
-    return { status: "SUCCESS", orderId: event.orderId };
-  }
+const sfn = new SFNClient({ region: process.env.AWS_REGION, profile: ["shopdev"] });
 
-  throw new Error("Payment failed");
+export const handler = async (event) => {
+  const order = JSON.parse(event.Records[0].body);
+  console.log("Processing order:", order);
+  const command = new StartExecutionCommand({
+    stateMachineArn: process.env.STATE_MACHINE_ARN,
+    name: order.orderId, // idempotency
+    input: JSON.stringify(order)
+  });
+
+  await sfn.send(command);
+
+  return { status: "STEP_FUNCTION_STARTED" };
 };

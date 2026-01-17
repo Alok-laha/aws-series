@@ -55,10 +55,10 @@ Resources:
               Fn::GetAtt:
               - OrderQueue
               - Arn
-          - Effect: Allow
+          - Effect: Alloww
             Action:
             - states:StartExecution
-            Resource: '*'
+            Resource: "*"
           - Effect: Allow
             Action:
             - sns:Publish
@@ -84,7 +84,10 @@ Resources:
           - Effect: Allow
             Action:
             - lambda:InvokeFunction
-            Resource: '*'
+            Resource:
+            - Fn::GetAtt:
+              - FinalizerLambda
+              - Arn
   PaymentLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -96,6 +99,10 @@ Resources:
         Fn::GetAtt:
         - LambdaExecutionRole
         - Arn
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN:
+            Ref: OrderStateMachine
       Code:
         S3Bucket: awslambdazips-al
         S3Key: lambdas/payment.zip
@@ -113,6 +120,19 @@ Resources:
       Code:
         S3Bucket: awslambdazips-al
         S3Key: lambdas/finalizer.zip
+  PaymentSQSTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn:
+        Fn::GetAtt:
+        - OrderQueue
+        - Arn
+      FunctionName:
+        Fn::GetAtt:
+        - PaymentLambda
+        - Arn
+      BatchSize: 1
+      Enabled: true
   OrderStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -123,12 +143,8 @@ Resources:
         - StepFunctionRole
         - Arn
       DefinitionString:
-        Fn::Sub: "{\n  \"StartAt\": \"ProcessPayment\",\n  \"States\": {\n    \"ProcessPayment\"\
-          : {\n      \"Type\": \"Task\",\n      \"Resource\": \"${PaymentLambda.Arn}\"\
-          ,\n      \"Retry\": [{\n        \"ErrorEquals\": [\"States.ALL\"],\n   \
-          \     \"IntervalSeconds\": 5,\n        \"MaxAttempts\": 2\n      }],\n \
-          \     \"Next\": \"FinalizeOrder\"\n    },\n    \"FinalizeOrder\": {\n  \
-          \    \"Type\": \"Task\",\n      \"Resource\": \"${FinalizerLambda.Arn}\"\
+        Fn::Sub: "{\n  \"StartAt\": \"FinalizeOrder\",\n  \"States\": {\n    \"FinalizeOrder\"\
+          : {\n      \"Type\": \"Task\",\n      \"Resource\": \"${FinalizerLambda.Arn}\"\
           ,\n      \"End\": true\n    }\n  }\n}\n"
 Outputs:
   OrderQueueUrl:

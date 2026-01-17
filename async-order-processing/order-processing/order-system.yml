@@ -54,10 +54,12 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
                 Resource: !GetAtt OrderQueue.Arn
-              - Effect: Allow
+
+              - Effect: Alloww
                 Action:
                   - states:StartExecution
-                Resource: "*"
+                Resource: !Ref OrderStateMachine
+
               - Effect: Allow
                 Action:
                   - sns:Publish
@@ -82,7 +84,8 @@ Resources:
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
-                Resource: "*"
+                Resource:
+                  - !GetAtt FinalizerLambda.Arn
 
   ### LAMBDAS ###
   PaymentLambda:
@@ -92,6 +95,9 @@ Resources:
       Runtime: nodejs20.x
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref OrderStateMachine
       Code:
         S3Bucket: awslambdazips-al
         S3Key: lambdas/payment.zip
@@ -107,6 +113,15 @@ Resources:
         S3Bucket: awslambdazips-al
         S3Key: lambdas/finalizer.zip
 
+  ### SQS → PAYMENT LAMBDA ###
+  PaymentSQSTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt OrderQueue.Arn
+      FunctionName: !GetAtt PaymentLambda.Arn
+      BatchSize: 1
+      Enabled: true
+
   ### STEP FUNCTION ###
   OrderStateMachine:
     Type: AWS::StepFunctions::StateMachine
@@ -115,18 +130,8 @@ Resources:
       RoleArn: !GetAtt StepFunctionRole.Arn
       DefinitionString: !Sub |
         {
-          "StartAt": "ProcessPayment",
+          "StartAt": "FinalizeOrder",
           "States": {
-            "ProcessPayment": {
-              "Type": "Task",
-              "Resource": "${PaymentLambda.Arn}",
-              "Retry": [{
-                "ErrorEquals": ["States.ALL"],
-                "IntervalSeconds": 5,
-                "MaxAttempts": 2
-              }],
-              "Next": "FinalizeOrder"
-            },
             "FinalizeOrder": {
               "Type": "Task",
               "Resource": "${FinalizerLambda.Arn}",
